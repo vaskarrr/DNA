@@ -792,4 +792,3 @@ st.markdown(f"""
 **ODS-X v{APP_VERSION}** · Deterministic bytes↔DNA mapping (2‑bit per base) with metadata, CRC, optional Hamming(7,4) ECC.
 Bioinformatics views (IC/GC/k-mers/motifs), 3D helix, mutation simulation, and GenBank plasmid export.
 """)
-
