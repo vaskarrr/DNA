@@ -10,14 +10,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
 from PIL import Image
-import io
+from io import BytesIO
 
 try:
     import magic
 except Exception:
     magic = None
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.1.0"
 STORE_DIR = "ods_store"
 INDEX_PATH = os.path.join(STORE_DIR, "index.json")
 FASTA_WRAP = 80
@@ -25,6 +25,9 @@ ENCODING_SCHEME = {0b00: "A", 0b01: "C", 0b10: "G", 0b11: "T"}
 DECODING_SCHEME = {v: k for k, v in ENCODING_SCHEME.items()}
 MAGIC = b"ODS1\x00"
 
+# ===============================================
+# Store Management
+# ===============================================
 def ensure_store():
     os.makedirs(STORE_DIR, exist_ok=True)
     if not os.path.exists(INDEX_PATH):
@@ -40,6 +43,9 @@ def save_index(idx: dict) -> None:
     with open(INDEX_PATH, "w", encoding="utf-8") as f:
         json.dump(idx, f, indent=2)
 
+# ===============================================
+# Header Definition
+# ===============================================
 @dataclass
 class ODSHeader:
     version: str
@@ -64,6 +70,9 @@ class ODSHeader:
         hdr = ODSHeader(**js)
         return hdr, 9 + size
 
+# ===============================================
+# DNA Conversion
+# ===============================================
 def bytes_to_dna(data: bytes) -> str:
     dna_chars = []
     for b in data:
@@ -86,6 +95,9 @@ def dna_to_bytes(seq: str) -> bytes:
         out.append(b)
     return bytes(out)
 
+# ===============================================
+# Analysis Helpers
+# ===============================================
 def sliding_windows(seq: str, window: int, step: int) -> T.Iterable[str]:
     if window > len(seq) and len(seq) > 0:
         yield seq
@@ -159,6 +171,9 @@ def make_stain_plots(seq: str, window: int = 300, step: int = 30, project_dir: s
     plt.close(fig3)
     return {"trace": path1, "scatter": path2, "heatmap": path3}
 
+# ===============================================
+# MIME Detection
+# ===============================================
 def detect_mime(name: str, data: bytes) -> str:
     if magic is not None:
         try:
@@ -176,20 +191,60 @@ def detect_mime(name: str, data: bytes) -> str:
     if ext in {".mp4"}: return "video/mp4"
     return "application/octet-stream"
 
-def pack_to_dna(name: str, data: bytes, compress: bool) -> T.Tuple[ODSHeader, str]:
+# ===============================================
+# Compression Utilities
+# ===============================================
+def compress_image_keep_format(name: str, data: bytes, quality: int = 85) -> bytes:
+    """
+    Compress image without changing its format or dimensions.
+    """
+    try:
+        img = Image.open(BytesIO(data))
+        img_format = img.format
+        buf = BytesIO()
+        if img_format == "PNG":
+            img.save(buf, format=img_format, optimize=True)
+        else:
+            img.save(buf, format=img_format, optimize=True, quality=quality)
+        return buf.getvalue()
+    except Exception:
+        # Not an image or cannot compress; return original
+        return data
+
+def estimate_compression(name: str, data: bytes, quality: int = 85) -> T.Tuple[bool, int, int, float]:
+    """
+    Estimate compression savings for image files.
+    Returns: (will_compress, original_size, estimated_size, reduction%)
+    """
+    try:
+        compressed = compress_image_keep_format(name, data, quality)
+        original_size = len(data)
+        compressed_size = len(compressed)
+        reduction = round(((original_size - compressed_size) / original_size) * 100, 2)
+        return compressed_size < original_size, original_size, compressed_size, reduction
+    except Exception:
+        return False, len(data), len(data), 0.0
+
+# ===============================================
+# Pack & Unpack
+# ===============================================
+def pack_to_dna(name: str, data: bytes, compress: bool, quality: int = 85) -> T.Tuple[ODSHeader, str]:
     mimetype = detect_mime(name, data)
-    payload = data  # ⚠ No zlib compression to keep original format
-    crc = zlib.crc32(payload) & 0xFFFFFFFF
+
+    if compress and mimetype.startswith("image/"):
+        data = compress_image_keep_format(name, data, quality)
+
+    crc = zlib.crc32(data) & 0xFFFFFFFF
     hdr = ODSHeader(
         version=APP_VERSION,
         project_id=str(uuid.uuid4()),
         filename=name,
         mimetype=mimetype,
-        length=len(payload),
-        compressed=False,  # Always false now
+        length=len(data),
+        compressed=compress,
         crc32=crc,
     )
-    packet = hdr.to_bytes() + payload
+    packet = hdr.to_bytes() + data
     dna = bytes_to_dna(packet)
     return hdr, dna
 
@@ -203,47 +258,42 @@ def unpack_from_dna(dna: str) -> T.Tuple[ODSHeader, bytes]:
         raise ValueError("CRC mismatch – data corrupted or wrong sequence")
     return hdr, payload
 
-def compress_image_bytes(data: bytes, filename: str, quality: int = 80) -> bytes:
-    """
-    Compress image bytes (JPEG/PNG) while keeping dimensions and format.
-    """
-    try:
-        img = Image.open(io.BytesIO(data))
-        img_format = img.format
-        output = io.BytesIO()
-        if img_format == "PNG":
-            img.save(output, format=img_format, optimize=True)
-        else:
-            img.save(output, format=img_format, optimize=True, quality=quality)
-        return output.getvalue()
-    except Exception:
-        return data  # If not an image or fails, return original
-
 def to_fasta(seq_id: str, dna: str, wrap: int = FASTA_WRAP) -> str:
     lines = [f">{seq_id}"]
     for i in range(0, len(dna), wrap):
         lines.append(dna[i:i+wrap])
     return "\n".join(lines) + "\n"
 
+# ===============================================
+# Streamlit UI
+# ===============================================
 st.set_page_config(page_title="Objective Digital Stains (ODS)", layout="wide")
-
 st.title("🧬 Objective Digital Stains (ODS)")
 st.caption("Convert any file into a DNA-like sequence, generate stain plots, and decode it back later.")
 
 with st.sidebar:
     st.header("1) Encode")
     uploaded = st.file_uploader("Upload any file", type=None)
-    compress = st.checkbox("Apply image optimization after decoding (for JPG/PNG)", value=True)
+    compress = st.checkbox("Compress image (keep format & size)", value=True)
+    quality = st.slider("Compression quality (for JPG)", min_value=10, max_value=95, value=85)
     window = st.number_input("Sliding window length", value=300, min_value=50, step=10)
     step = st.number_input("Window step", value=30, min_value=1, step=1)
+    check_compression = st.button("Check compression potential")
     do_encode = st.button("Encode to DNA + Generate Stains")
     st.header("2) Decode")
     seq_input = st.text_area("Paste DNA sequence (FASTA or raw)", height=140)
     do_decode = st.button("Decode DNA back to file")
 
 ensure_store()
-
 col1, col2 = st.columns(2)
+
+if uploaded is not None and check_compression:
+    raw = uploaded.read()
+    will_compress, orig, comp, reduction = estimate_compression(uploaded.name, raw, quality)
+    if will_compress:
+        st.success(f"Compression possible: {orig//1024}KB → {comp//1024}KB ({reduction}% reduction)")
+    else:
+        st.info(f"No significant compression benefit. Original size: {orig//1024}KB")
 
 if do_encode and uploaded is not None:
     name = uploaded.name
@@ -251,7 +301,7 @@ if do_encode and uploaded is not None:
     if raw is None:
         st.error("Empty file")
     else:
-        hdr, dna = pack_to_dna(name, raw, compress)
+        hdr, dna = pack_to_dna(name, raw, compress, quality)
         project_dir = os.path.join(STORE_DIR, hdr.project_id)
         os.makedirs(project_dir, exist_ok=True)
         fasta = to_fasta(hdr.project_id, dna)
@@ -287,9 +337,6 @@ if do_decode and seq_input.strip():
     dna_seq = "".join(raw_seq).upper().replace(" ", "")
     try:
         hdr, data = unpack_from_dna(dna_seq)
-        # Apply compression for images if enabled
-        if compress and hdr.mimetype in {"image/jpeg", "image/png"}:
-            data = compress_image_bytes(data, hdr.filename)
         st.success("Decoded successfully!")
         st.json(asdict(hdr))
         st.download_button(label=f"Download decoded: {hdr.filename}", data=data, file_name=hdr.filename, mime=hdr.mimetype or "application/octet-stream")
@@ -327,5 +374,5 @@ else:
 st.markdown(f"""
 ---
 **ODS v{APP_VERSION}** · Deterministic bytes↔DNA mapping (2-bit per base) with metadata & CRC.
-Stain plots approximate promoter-style analytics (IC/CG/di-nucleotide heatmaps) for arbitrary data.
+Enhanced with image compression (lossless for PNG, quality-based for JPG) and compression check.
 """)
