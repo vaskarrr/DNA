@@ -180,7 +180,7 @@ for i in range(0, len(bits), 2):
     if base in 'GC': gc_count += 1
 
     dna.append(primer_right)
-    return ''.join(dna)
+return ''.join(dna)
 
 def decode_dna_ga(seq: str, primer_left: str, primer_right: str) -> bytes:
     if not (seq.startswith(primer_left) and seq.endswith(primer_right)):
