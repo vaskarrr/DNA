@@ -161,22 +161,24 @@ def encode_to_dna_ga(blob: bytes, primer_left: str, primer_right: str, target_gc
     dna = [primer_left]
     prev = 'A'
     gc_count = 0
-    for i in range(0, len(bits), 2):
-        code = bits[i:i+2].ljust(2,'0')
-        candidates = _mapping[prev]
-        # filter by GC constraints
-        valid = []
-        for base in candidates:
-            gc = gc_count + (1 if base in 'GC' else 0)
-            if (gc / (len(dna)-len(primer_left)+1)) >= target_gc[0] and (gc / (len(dna)-len(primer_left)+1)) <= target_gc[1]:
-                valid.append(base)
-        if valid:
-            base = random.choice(valid)
-        else:
-            base = random.choice(candidates)
-        dna.append(base)
-        prev = base
-        if base in 'GC': gc_count +=1
+for i in range(0, len(bits), 2):
+    code = bits[i:i+2].ljust(2,'0')
+    candidates = _mapping[prev]
+    valid = []
+    current_len = len(dna) - len(primer_left)
+    gc_ratio = lambda gc: gc / current_len if current_len > 0 else 0
+    for base in candidates:
+        new_gc_count = gc_count + (1 if base in 'GC' else 0)
+        if target_gc[0] <= gc_ratio(new_gc_count) <= target_gc[1]:
+            valid.append(base)
+    if valid:
+        base = random.choice(valid)
+    else:
+        base = random.choice(candidates)
+    dna.append(base)
+    prev = base
+    if base in 'GC': gc_count += 1
+
     dna.append(primer_right)
     return ''.join(dna)
 
