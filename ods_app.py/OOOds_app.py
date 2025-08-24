@@ -9,13 +9,15 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
+from PIL import Image
+import io
 
 try:
     import magic
 except Exception:
     magic = None
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 STORE_DIR = "ods_store"
 INDEX_PATH = os.path.join(STORE_DIR, "index.json")
 FASTA_WRAP = 80
@@ -176,7 +178,7 @@ def detect_mime(name: str, data: bytes) -> str:
 
 def pack_to_dna(name: str, data: bytes, compress: bool) -> T.Tuple[ODSHeader, str]:
     mimetype = detect_mime(name, data)
-    payload = zlib.compress(data) if compress else data
+    payload = data  # ⚠ No zlib compression to keep original format
     crc = zlib.crc32(payload) & 0xFFFFFFFF
     hdr = ODSHeader(
         version=APP_VERSION,
@@ -184,7 +186,7 @@ def pack_to_dna(name: str, data: bytes, compress: bool) -> T.Tuple[ODSHeader, st
         filename=name,
         mimetype=mimetype,
         length=len(payload),
-        compressed=compress,
+        compressed=False,  # Always false now
         crc32=crc,
     )
     packet = hdr.to_bytes() + payload
@@ -199,8 +201,23 @@ def unpack_from_dna(dna: str) -> T.Tuple[ODSHeader, bytes]:
         raise ValueError("Payload truncated")
     if (zlib.crc32(payload) & 0xFFFFFFFF) != hdr.crc32:
         raise ValueError("CRC mismatch – data corrupted or wrong sequence")
-    data = zlib.decompress(payload) if hdr.compressed else payload
-    return hdr, data
+    return hdr, payload
+
+def compress_image_bytes(data: bytes, filename: str, quality: int = 80) -> bytes:
+    """
+    Compress image bytes (JPEG/PNG) while keeping dimensions and format.
+    """
+    try:
+        img = Image.open(io.BytesIO(data))
+        img_format = img.format
+        output = io.BytesIO()
+        if img_format == "PNG":
+            img.save(output, format=img_format, optimize=True)
+        else:
+            img.save(output, format=img_format, optimize=True, quality=quality)
+        return output.getvalue()
+    except Exception:
+        return data  # If not an image or fails, return original
 
 def to_fasta(seq_id: str, dna: str, wrap: int = FASTA_WRAP) -> str:
     lines = [f">{seq_id}"]
@@ -211,12 +228,12 @@ def to_fasta(seq_id: str, dna: str, wrap: int = FASTA_WRAP) -> str:
 st.set_page_config(page_title="Objective Digital Stains (ODS)", layout="wide")
 
 st.title("🧬 Objective Digital Stains (ODS)")
-st.caption("Convert any file into a DNA‑like sequence, generate stain plots, and decode it back later.")
+st.caption("Convert any file into a DNA-like sequence, generate stain plots, and decode it back later.")
 
 with st.sidebar:
     st.header("1) Encode")
     uploaded = st.file_uploader("Upload any file", type=None)
-    compress = st.checkbox("Gzip‑compress payload (smaller DNA)", value=True)
+    compress = st.checkbox("Apply image optimization after decoding (for JPG/PNG)", value=True)
     window = st.number_input("Sliding window length", value=300, min_value=50, step=10)
     step = st.number_input("Window step", value=30, min_value=1, step=1)
     do_encode = st.button("Encode to DNA + Generate Stains")
@@ -270,6 +287,9 @@ if do_decode and seq_input.strip():
     dna_seq = "".join(raw_seq).upper().replace(" ", "")
     try:
         hdr, data = unpack_from_dna(dna_seq)
+        # Apply compression for images if enabled
+        if compress and hdr.mimetype in {"image/jpeg", "image/png"}:
+            data = compress_image_bytes(data, hdr.filename)
         st.success("Decoded successfully!")
         st.json(asdict(hdr))
         st.download_button(label=f"Download decoded: {hdr.filename}", data=data, file_name=hdr.filename, mime=hdr.mimetype or "application/octet-stream")
@@ -306,11 +326,6 @@ else:
 
 st.markdown(f"""
 ---
-**ODS v{APP_VERSION}** · Deterministic bytes↔DNA mapping (2‑bit per base) with metadata & CRC.
-Stain plots approximate promoter‑style analytics (IC/CG/di‑nucleotide heatmaps) for arbitrary data.
+**ODS v{APP_VERSION}** · Deterministic bytes↔DNA mapping (2-bit per base) with metadata & CRC.
+Stain plots approximate promoter-style analytics (IC/CG/di-nucleotide heatmaps) for arbitrary data.
 """)
-
-
-
-
-
