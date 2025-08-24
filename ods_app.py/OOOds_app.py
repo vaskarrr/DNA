@@ -191,6 +191,7 @@ def pack_to_dna(name: str, data: bytes, compress: bool) -> T.Tuple[ODSHeader, st
     dna = bytes_to_dna(packet)
     return hdr, dna
 
+# ✅ Modified: Do NOT decompress, return compressed payload if hdr.compressed=True
 def unpack_from_dna(dna: str) -> T.Tuple[ODSHeader, bytes]:
     packet = dna_to_bytes(dna)
     hdr, ofs = ODSHeader.from_bytes(packet)
@@ -199,8 +200,7 @@ def unpack_from_dna(dna: str) -> T.Tuple[ODSHeader, bytes]:
         raise ValueError("Payload truncated")
     if (zlib.crc32(payload) & 0xFFFFFFFF) != hdr.crc32:
         raise ValueError("CRC mismatch – data corrupted or wrong sequence")
-    data = zlib.decompress(payload) if hdr.compressed else payload
-    return hdr, data
+    return hdr, payload  # ✅ No decompression
 
 def to_fasta(seq_id: str, dna: str, wrap: int = FASTA_WRAP) -> str:
     lines = [f">{seq_id}"]
@@ -211,12 +211,12 @@ def to_fasta(seq_id: str, dna: str, wrap: int = FASTA_WRAP) -> str:
 st.set_page_config(page_title="Objective Digital Stains (ODS)", layout="wide")
 
 st.title("🧬 Objective Digital Stains (ODS)")
-st.caption("Convert any file into a DNA‑like sequence, generate stain plots, and decode it back later.")
+st.caption("Convert any file into a DNA-like sequence, generate stain plots, and decode it back later (compressed version if enabled).")
 
 with st.sidebar:
     st.header("1) Encode")
     uploaded = st.file_uploader("Upload any file", type=None)
-    compress = st.checkbox("Gzip‑compress payload (smaller DNA)", value=True)
+    compress = st.checkbox("Gzip-compress payload (smaller DNA)", value=True)
     window = st.number_input("Sliding window length", value=300, min_value=50, step=10)
     step = st.number_input("Window step", value=30, min_value=1, step=1)
     do_encode = st.button("Encode to DNA + Generate Stains")
@@ -272,7 +272,15 @@ if do_decode and seq_input.strip():
         hdr, data = unpack_from_dna(dna_seq)
         st.success("Decoded successfully!")
         st.json(asdict(hdr))
-        st.download_button(label=f"Download decoded: {hdr.filename}", data=data, file_name=hdr.filename, mime=hdr.mimetype or "application/octet-stream")
+        download_name = hdr.filename
+        if hdr.compressed:
+            download_name += ".gz"  # ✅ Add .gz extension
+        st.download_button(
+            label=f"Download decoded: {download_name}",
+            data=data,
+            file_name=download_name,
+            mime="application/gzip" if hdr.compressed else hdr.mimetype or "application/octet-stream"
+        )
     except Exception as e:
         st.error(f"Decoding failed: {e}")
 
@@ -306,6 +314,6 @@ else:
 
 st.markdown(f"""
 ---
-**ODS v{APP_VERSION}** · Deterministic bytes↔DNA mapping (2‑bit per base) with metadata & CRC.
-Stain plots approximate promoter‑style analytics (IC/CG/di‑nucleotide heatmaps) for arbitrary data.
+**ODS v{APP_VERSION}** · Deterministic bytes↔DNA mapping (2-bit per base) with metadata & CRC.
+Stain plots approximate promoter-style analytics (IC/CG/di-nucleotide heatmaps) for arbitrary data.
 """)
