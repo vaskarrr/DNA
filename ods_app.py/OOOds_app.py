@@ -1,49 +1,3 @@
-import subprocess
-import sys
-
-# Auto-install dependencies if missing
-required = ['odfpy', 'pandas', 'streamlit']
-for pkg in required:
-    try:
-        __import__(pkg)
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
-
-import streamlit as st
-import pandas as pd
-from odf.opendocument import load
-from odf.table import Table, TableRow, TableCell
-from odf.text import P
-
-st.title("ODS File Viewer")
-
-uploaded_file = st.file_uploader("Upload an ODS file", type=["ods"])
-
-if uploaded_file:
-    # Load ODS file
-    doc = load(uploaded_file)
-    all_data = []
-
-    for sheet in doc.spreadsheet.getElementsByType(Table):
-        sheet_name = sheet.getAttribute("name")
-        rows = []
-        for row in sheet.getElementsByType(TableRow):
-            cells = []
-            for cell in row.getElementsByType(TableCell):
-                text_content = ''.join(str(p) for p in cell.getElementsByType(P))
-                cells.append(text_content)
-            rows.append(cells)
-        all_data.append({"Sheet": sheet_name, "Data": pd.DataFrame(rows)})
-
-    sheet_names = [s["Sheet"] for s in all_data]
-    selected_sheet = st.selectbox("Select a sheet", sheet_names)
-    selected_data = next(item for item in all_data if item["Sheet"] == selected_sheet)
-
-    st.write(f"### Data from {selected_sheet}")
-    st.dataframe(selected_data["Data"])
-
-
-
 import os
 import zlib
 import uuid
@@ -364,4 +318,5 @@ st.markdown(f"""
 **ODS v{APP_VERSION}** · Deterministic bytes↔DNA mapping (2-bit per base) with metadata & CRC.
 Stain plots approximate promoter-style analytics (IC/CG/di-nucleotide heatmaps) for arbitrary data.
 """)
+
 
