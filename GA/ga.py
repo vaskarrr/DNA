@@ -578,9 +578,3 @@ st.markdown(f"""
 **ODS Bio v{APP_VERSION}** · 2-bit DNA mapping optimized with a Genetic Algorithm (homopolymer/GC/dinucleotide score).
 Bio analytics: CpG islands, ORFs (6-frame), codon usage, IC/CG traces, dinucleotide heatmap.
 """)
-
-with open('/mnt/data/OOOds_app_bio.py', 'w', encoding='utf-8') as f:
-    f.write(code)
-
-print("Saved enhanced app to /mnt/data/OOOds_app_bio.py")
-
