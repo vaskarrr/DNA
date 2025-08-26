@@ -10,11 +10,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
 
-try:
-    import magic
-except Exception:
-    magic = None
-
 APP_VERSION = "1.1.0"
 STORE_DIR = "ods_store"
 INDEX_PATH = os.path.join(STORE_DIR, "index.json")
@@ -160,13 +155,7 @@ def make_stain_plots(seq: str, window: int = 300, step: int = 30, project_dir: s
     plt.close(fig3)
     return {"trace": path1, "scatter": path2, "heatmap": path3}
 
-def detect_mime(name: str, data: bytes) -> str:
-    if magic is not None:
-        try:
-            m = magic.Magic(mime=True)
-            return m.from_buffer(data)
-        except Exception:
-            pass
+def detect_mime(name: str) -> str:
     ext = os.path.splitext(name)[1].lower()
     if ext in {".txt", ".md", ".csv"}: return "text/plain"
     if ext in {".png"}: return "image/png"
@@ -178,7 +167,7 @@ def detect_mime(name: str, data: bytes) -> str:
     return "application/octet-stream"
 
 def pack_to_dna(name: str, data: bytes, allow_compression: bool) -> T.Tuple[ODSHeader, str]:
-    mimetype = detect_mime(name, data)
+    mimetype = detect_mime(name)
     original_size = len(data)
     
     if allow_compression:
